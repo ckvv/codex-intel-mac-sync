@@ -1,0 +1,9 @@
+# Build artifacts
+.build/
+dist/
+
+# Generated output images
+*.dmg
+
+# macOS
+.DS_Store

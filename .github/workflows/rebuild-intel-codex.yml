@@ -1,0 +1,118 @@
+name: Rebuild Intel Codex
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 */6 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-intel-codex
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: macos-15-intel
+    env:
+      SOURCE_URL: https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Inspect upstream Codex DMG
+        id: upstream
+        run: ./.github/scripts/inspect-upstream-codex.sh "$SOURCE_URL" "$RUNNER_TEMP/Codex.dmg"
+
+      - name: Check whether this build was already published
+        id: release_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.upstream.outputs.release_tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        if: steps.release_check.outputs.should_build == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Intel Codex CLI
+        if: steps.release_check.outputs.should_build == 'true'
+        run: npm install -g @openai/codex
+
+      - name: Build Intel DMG
+        if: steps.release_check.outputs.should_build == 'true'
+        env:
+          SOURCE_DMG: ${{ steps.upstream.outputs.source_dmg }}
+          ASSET_NAME: ${{ steps.upstream.outputs.asset_name }}
+        run: |
+          CLI_BIN="$(command -v codex)"
+          file "$CLI_BIN"
+          ./codex-intel.sh \
+            --source-dmg "$SOURCE_DMG" \
+            --dmg \
+            --cli-bin "$CLI_BIN" \
+            --output-dmg "$GITHUB_WORKSPACE/dist/$ASSET_NAME"
+
+      - name: Upload workflow artifact
+        if: steps.release_check.outputs.should_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.upstream.outputs.asset_name }}
+          path: dist/${{ steps.upstream.outputs.asset_name }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: steps.release_check.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.upstream.outputs.release_tag }}
+          RELEASE_NAME: ${{ steps.upstream.outputs.release_name }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+          BUILD: ${{ steps.upstream.outputs.build }}
+          SOURCE_SHA256: ${{ steps.upstream.outputs.source_sha256 }}
+          SOURCE_URL: ${{ steps.upstream.outputs.source_url }}
+          ASSET_PATH: dist/${{ steps.upstream.outputs.asset_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          cat > release-notes.md <<EOF
+          Source URL: $SOURCE_URL
+          Upstream version: $VERSION
+          Upstream build: $BUILD
+          Source SHA256: $SOURCE_SHA256
+          Workflow run: $RUN_URL
+          EOF
+
+          gh release create "$RELEASE_TAG" "$ASSET_PATH" \
+            --title "$RELEASE_NAME" \
+            --notes-file release-notes.md
+
+      - name: Write job summary
+        env:
+          SHOULD_BUILD: ${{ steps.release_check.outputs.should_build }}
+          RELEASE_TAG: ${{ steps.upstream.outputs.release_tag }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+          BUILD: ${{ steps.upstream.outputs.build }}
+          SOURCE_SHA256: ${{ steps.upstream.outputs.source_sha256 }}
+          ASSET_NAME: ${{ steps.upstream.outputs.asset_name }}
+        run: |
+          {
+            echo "## Codex upstream check"
+            echo
+            echo "- Version: $VERSION"
+            echo "- Build: $BUILD"
+            echo "- SHA256: \`$SOURCE_SHA256\`"
+            echo "- Release tag: \`$RELEASE_TAG\`"
+            if [[ "$SHOULD_BUILD" == "true" ]]; then
+              echo "- Result: built and published \`$ASSET_NAME\`"
+            else
+              echo "- Result: skipped because this upstream DMG was already published"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
