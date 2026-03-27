@@ -31,4 +31,6 @@ Generated assets use this pattern:
 
 ## Runner Choice
 
-The workflow uses the `macos-15-intel` GitHub-hosted runner so the temporary global `@openai/codex` install resolves to an Intel CLI binary that can be bundled into the repackaged app.
+The workflow uses the `macos-15-intel` GitHub-hosted runner so the temporary global `@openai/codex` install includes an Intel vendor binary that can be bundled into the repackaged app.
+
+Recent `@openai/codex` installs expose `codex` as a Node launcher script in `$PATH`, not as the Mach-O binary itself. `./codex-intel.sh` now resolves that launcher back to the packaged `@openai/codex-darwin-x64` binary automatically during repackaging, so the workflow does not need to pass `command -v codex` explicitly.

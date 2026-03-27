@@ -41,7 +41,7 @@ Build options:
   --node-pty-version <ver>     node-pty version (default: 1.1.0)
 
 Repackage options:
-  --cli-bin <path>             Force Intel codex CLI path
+  --cli-bin <path>             Force Intel codex CLI path (binary or npm launcher)
   --skip-cli-bundle            Do not bundle codex CLI
   --sparkle-node <path>        Optional Intel sparkle.node
 
@@ -173,15 +173,81 @@ extract_app_from_dmg() {
   hdiutil detach "$mount_point" -force >/dev/null 2>&1 || true
 }
 
+resolve_symlink_path() {
+  local path="$1"
+  local target=""
+  local path_dir=""
+
+  while [[ -L "$path" ]]; do
+    target="$(readlink "$path")"
+    if [[ "$target" == /* ]]; then
+      path="$target"
+    else
+      path_dir="$(cd "$(dirname "$path")" && pwd -P)"
+      path="${path_dir}/${target}"
+    fi
+  done
+
+  printf '%s\n' "$path"
+}
+
+print_cli_bin_candidates_from_hint() {
+  local hint="$1"
+  local resolved_hint=""
+  local hint_dir=""
+  local hint_prefix=""
+  local package_root=""
+
+  [[ -n "$hint" ]] || return 0
+
+  printf '%s\n' "$hint"
+
+  if [[ -e "$hint" || -L "$hint" ]]; then
+    resolved_hint="$(resolve_symlink_path "$hint")"
+    [[ "$resolved_hint" != "$hint" ]] && printf '%s\n' "$resolved_hint"
+
+    if [[ "$resolved_hint" == *"/node_modules/@openai/codex/"* ]]; then
+      package_root="${resolved_hint%%/node_modules/@openai/codex/*}/node_modules/@openai/codex"
+      printf '%s\n' "${package_root}/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
+    fi
+  fi
+
+  hint_dir="$(dirname "$hint")"
+  if [[ "$(basename "$hint_dir")" == "bin" ]]; then
+    hint_prefix="$(cd "${hint_dir}/.." && pwd -P 2>/dev/null || true)"
+    if [[ -n "$hint_prefix" ]]; then
+      printf '%s\n' "${hint_prefix}/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
+      printf '%s\n' "${hint_prefix}/lib/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
+    fi
+  fi
+}
+
+resolve_cli_bin_hint() {
+  local hint="$1"
+  local candidate=""
+
+  while IFS= read -r candidate; do
+    if [[ -x "$candidate" ]] && is_x86_64_binary "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(print_cli_bin_candidates_from_hint "$hint")
+
+  return 1
+}
+
 detect_cli_bin() {
   local npm_root=""
-  local candidates=()
   local codex_path=""
   local candidate
 
   if command -v codex >/dev/null 2>&1; then
     codex_path="$(command -v codex || true)"
-    [[ -n "$codex_path" ]] && candidates+=("$codex_path")
+    candidate="$(resolve_cli_bin_hint "$codex_path" || true)"
+    if [[ -n "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
   fi
 
   if command -v npm >/dev/null 2>&1; then
@@ -189,16 +255,23 @@ detect_cli_bin() {
   fi
 
   if [[ -n "$npm_root" ]]; then
-    candidates+=("${npm_root}/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex")
-    candidates+=("${npm_root}/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex")
+    for candidate in \
+      "${npm_root}/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex" \
+      "${npm_root}/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex"
+    do
+      if [[ -x "$candidate" ]] && is_x86_64_binary "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    done
   fi
 
-  candidates+=("/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex")
-  candidates+=("/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex")
-  candidates+=("/usr/local/bin/codex")
-  candidates+=("/opt/homebrew/bin/codex")
-
-  for candidate in "${candidates[@]}"; do
+  for candidate in \
+    "/usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex" \
+    "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex" \
+    "/usr/local/bin/codex" \
+    "/opt/homebrew/bin/codex"
+  do
     if [[ -x "$candidate" ]] && is_x86_64_binary "$candidate"; then
       printf '%s\n' "$candidate"
       return 0
@@ -336,6 +409,7 @@ resolve_artifacts_from_workdir() {
 repackage_app() {
   local output_frameworks_dir output_resources_dir output_unpacked_dir
   local framework helper
+  local resolved_cli_bin=""
 
   resolve_artifacts_from_workdir
 
@@ -343,6 +417,14 @@ repackage_app() {
     "${WORKDIR}/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex" \
     "${WORKDIR}/node_modules/@openai/codex/node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/codex/codex" \
     "${WORKDIR}/codex" || true)"
+
+  if [[ -n "$CLI_BIN" && "$SKIP_CLI_BUNDLE" -eq 0 ]]; then
+    resolved_cli_bin="$(resolve_cli_bin_hint "$CLI_BIN" || true)"
+    if [[ -n "$resolved_cli_bin" && "$resolved_cli_bin" != "$CLI_BIN" ]]; then
+      log "Resolved Intel codex CLI from launcher path: $resolved_cli_bin"
+      CLI_BIN="$resolved_cli_bin"
+    fi
+  fi
 
   if [[ -z "$CLI_BIN" && "$SKIP_CLI_BUNDLE" -eq 0 ]]; then
     CLI_BIN="$(detect_cli_bin || true)"

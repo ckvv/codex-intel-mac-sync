@@ -53,12 +53,9 @@ jobs:
           SOURCE_DMG: ${{ steps.upstream.outputs.source_dmg }}
           ASSET_NAME: ${{ steps.upstream.outputs.asset_name }}
         run: |
-          CLI_BIN="$(command -v codex)"
-          file "$CLI_BIN"
           ./codex-intel.sh \
             --source-dmg "$SOURCE_DMG" \
             --dmg \
-            --cli-bin "$CLI_BIN" \
             --output-dmg "$GITHUB_WORKSPACE/dist/$ASSET_NAME"
 
       - name: Upload workflow artifact
