@@ -305,8 +305,9 @@ prepare_artifacts() {
     npm init -y >/dev/null
   fi
 
+  log "npm registry: $(npm config get registry 2>/dev/null || true)"
   log "Installing build dependencies"
-  npm install \
+  npm install --loglevel verbose \
     "electron@${ELECTRON_VERSION}" \
     "better-sqlite3@${BETTER_SQLITE3_VERSION}" \
     "node-pty@${NODE_PTY_VERSION}" \
@@ -553,7 +554,7 @@ repackage_app() {
 
   log "Removing stale signatures and quarantine metadata"
   find "$OUTPUT_APP" -name _CodeSignature -type d -prune -exec rm -rf {} +
-  xattr -cr "$OUTPUT_APP"
+  find "$OUTPUT_APP" -exec xattr -c {} + >/dev/null 2>&1 || true
 
   log "Ad-hoc signing rebuilt app"
   codesign --force --deep --sign - "$OUTPUT_APP"
