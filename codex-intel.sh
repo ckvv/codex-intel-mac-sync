@@ -280,10 +280,27 @@ detect_cli_bin() {
   return 1
 }
 
+ensure_global_codex_cli() {
+  if command -v codex >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    return 1
+  fi
+
+  log "Intel Codex CLI not found; installing globally via npm"
+  npm install -g @openai/codex --registry https://registry.npmmirror.com/ --no-audit
+}
+
 prepare_artifacts() {
   require_command npm
   require_command npx
   require_command xcode-select
+
+  if [[ "$SKIP_CLI_BUNDLE" -eq 0 ]]; then
+    ensure_global_codex_cli || true
+  fi
 
   if ! xcode-select -p >/dev/null 2>&1; then
     log "Xcode Command Line Tools are required."
@@ -532,8 +549,12 @@ repackage_app() {
     log "Bundling x64 codex CLI"
     copy_file "$CLI_BIN" "${output_resources_dir}/codex"
     chmod +x "${output_resources_dir}/codex"
+    copy_file "$CLI_BIN" "${output_resources_dir}/bin/codex"
+    chmod +x "${output_resources_dir}/bin/codex"
     copy_file "$CLI_BIN" "${output_unpacked_dir}/codex"
     chmod +x "${output_unpacked_dir}/codex"
+    copy_file "$CLI_BIN" "${output_unpacked_dir}/bin/codex"
+    chmod +x "${output_unpacked_dir}/bin/codex"
   else
     log "Skipping bundled CLI"
     rm -f "${output_resources_dir}/codex"
