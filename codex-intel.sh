@@ -280,10 +280,27 @@ detect_cli_bin() {
   return 1
 }
 
+ensure_global_codex_cli() {
+  if command -v codex >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    return 1
+  fi
+
+  log "Intel Codex CLI not found; installing globally via npm"
+  npm install -g @openai/codex --registry https://registry.npmmirror.com/ --no-audit
+}
+
 prepare_artifacts() {
   require_command npm
   require_command npx
   require_command xcode-select
+
+  if [[ "$SKIP_CLI_BUNDLE" -eq 0 ]]; then
+    ensure_global_codex_cli || true
+  fi
 
   if ! xcode-select -p >/dev/null 2>&1; then
     log "Xcode Command Line Tools are required."
@@ -305,8 +322,9 @@ prepare_artifacts() {
     npm init -y >/dev/null
   fi
 
+  log "npm registry: $(npm config get registry 2>/dev/null || true)"
   log "Installing build dependencies"
-  npm install \
+  npm install --loglevel verbose \
     "electron@${ELECTRON_VERSION}" \
     "better-sqlite3@${BETTER_SQLITE3_VERSION}" \
     "node-pty@${NODE_PTY_VERSION}" \
@@ -531,8 +549,12 @@ repackage_app() {
     log "Bundling x64 codex CLI"
     copy_file "$CLI_BIN" "${output_resources_dir}/codex"
     chmod +x "${output_resources_dir}/codex"
+    copy_file "$CLI_BIN" "${output_resources_dir}/bin/codex"
+    chmod +x "${output_resources_dir}/bin/codex"
     copy_file "$CLI_BIN" "${output_unpacked_dir}/codex"
     chmod +x "${output_unpacked_dir}/codex"
+    copy_file "$CLI_BIN" "${output_unpacked_dir}/bin/codex"
+    chmod +x "${output_unpacked_dir}/bin/codex"
   else
     log "Skipping bundled CLI"
     rm -f "${output_resources_dir}/codex"
@@ -553,7 +575,7 @@ repackage_app() {
 
   log "Removing stale signatures and quarantine metadata"
   find "$OUTPUT_APP" -name _CodeSignature -type d -prune -exec rm -rf {} +
-  xattr -cr "$OUTPUT_APP"
+  find "$OUTPUT_APP" -exec xattr -c {} + >/dev/null 2>&1 || true
 
   log "Ad-hoc signing rebuilt app"
   codesign --force --deep --sign - "$OUTPUT_APP"
