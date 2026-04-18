@@ -586,14 +586,12 @@ make_dmg() {
   mkdir -p "$(dirname "$staging_dir")"
   mkdir -p "$(dirname "$tmp_dmg")"
   rm -rf "$staging_dir"
-  mkdir -p "$staging_dir"
   rm -f "$tmp_dmg"
 
   app_name="$(basename "$source_app")"
-  ditto "$source_app" "${staging_dir}/${app_name}"
-  ln -s /Applications "${staging_dir}/Applications"
 
-  staging_size_mb="$(du -sm "$staging_dir" | awk '{print $1 + 96}')"
+  # Calculate size from source app directly (no staging copy needed)
+  staging_size_mb="$(du -sm "$source_app" | awk '{print $1 + 96}')"
   log "Creating writable DMG template"
   hdiutil create \
     -size "${staging_size_mb}m" \
@@ -650,7 +648,6 @@ EOF
     -ov \
     -o "$output_dmg" >/dev/null
 
-  rm -rf "$staging_dir"
   rm -f "$tmp_dmg"
 }
 
@@ -877,6 +874,19 @@ if [[ "$RUN_REPACKAGE" -eq 1 ]]; then
   repackage_app
   if [[ -n "$TEMP_OUTPUT_APP" ]]; then
     TEMP_APP_CREATED=1
+  fi
+  # Free disk space before DMG creation
+  if [[ "$RUN_DMG" -eq 1 ]]; then
+    # Clean build workdir (Electron, node_modules, etc. ~500MB+)
+    if [[ "$SKIP_BUILD" -eq 0 ]]; then
+      log "Cleaning build workdir to free disk space"
+      rm -rf "$WORKDIR"
+    fi
+    # Clean extracted source app if we don't need --app output (~300MB)
+    if [[ "$WANT_APP" -eq 0 && "$SOURCE_APP" == "${REPO_ROOT}/.build/source/Codex.app" ]]; then
+      log "Cleaning extracted source app to free disk space"
+      rm -rf "$SOURCE_APP"
+    fi
   fi
 fi
 
