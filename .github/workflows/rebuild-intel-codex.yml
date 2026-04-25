@@ -1,9 +1,10 @@
 name: Rebuild Intel Codex
 
+# ⚠️ DISABLED: OpenAI Codex now officially supports Intel macOS.
+# See: https://developers.openai.com/codex/quickstart
+# Schedule trigger removed. Manual dispatch remains available if needed.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '23 */6 * * *'
 
 permissions:
   contents: write

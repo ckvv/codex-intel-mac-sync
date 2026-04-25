@@ -1,5 +1,15 @@
 # codex-intel-mac
 
+> ⚠️ **项目已废弃 (Deprecated)**
+>
+> OpenAI Codex 官方现已支持 Intel macOS 安装包。请直接从官方下载：
+>
+> - **官方快速入门**: https://developers.openai.com/codex/quickstart
+>
+> 本项目不再需要维护。感谢所有使用者的支持！
+
+---
+
 Single-script workflow to rebuild Codex Desktop for Intel macOS from a source `Codex.dmg` or `Codex.app`.
 
 ## Automation
